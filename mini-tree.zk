@@ -4,13 +4,13 @@ let preimage_length = 256i;
 type hash = list#256(bool);
 type hashean = list#256(boolean);
 
-let utxo_set_size = 2i;
-type utxo_set = list#2(hash);
-type utxo_setean = list#2(hashean);
+let utxo_set_size = 4i;
+type utxo_set = list#4(hash);
+type utxo_setean = list#4(hashean);
 
-type utxo_phashes = list#2(field);
+type utxo_phashes = list#4(field);
 
-let pad_to_preimage_length = fun (xs) => {
+let pad_to_length = fun (xs) => {
   let n = List.length(xs);
   if (n > preimage_length) {
     failwith("Too big to be a preimage");
@@ -23,20 +23,14 @@ let pad_to_preimage_length = fun (xs) => {
   };
 };
 
-let get_preimage : unit -> hash = fun () => {
-  print_endline("Please enter your preimage") ;
-  let s = read_line () ;
-  pad_to_preimage_length(Blake2.string_to_bool_list(s));
-};
-
 // Returns UTXO string, and its padded list versoin
 let get_proof_utxo: unit -> hash = fun () => {
 		// Load UTXO set.
-		let chan = open_in ("dumb-proof-utxo.dat");
+		let chan = open_in ("dumb-utxo-proof.dat");
 		let utxo = input_line (chan);
 		close_in_noerr (chan);
 
-  	let utxo_hash = pad_to_preimage_length(Blake2.string_to_bool_list(utxo));
+  	let utxo_hash = pad_to_length(Blake2.string_to_bool_list(utxo));
 	//	(utxo, utxo_hash);
 		utxo_hash;
 };
@@ -46,12 +40,17 @@ let get_utxo_set : unit -> utxo_set = fun () => {
 		let chan = open_in ("dumb-utxo-set.dat");
 		let line1 = input_line (chan);
 		let line2 = input_line (chan);
+		let line3 = input_line (chan);
+		let line4 = input_line (chan);
 		close_in_noerr (chan);
 
-  	let l = pad_to_preimage_length(Blake2.string_to_bool_list(line1));
-  	let r = pad_to_preimage_length(Blake2.string_to_bool_list(line2));
-		[l, r];
+  	let l1 = pad_to_length(Blake2.string_to_bool_list(line1));
+  	let l2= pad_to_length(Blake2.string_to_bool_list(line2));
+  	let l3 = pad_to_length(Blake2.string_to_bool_list(line3));
+  	let l4 = pad_to_length(Blake2.string_to_bool_list(line4));
+		[l1, l2, l3, l4];
 };
+
 
 let main = fun (expected_output : field, ()) => {
   let params = load_pedersen_params("bn128-params");
@@ -70,13 +69,19 @@ let main = fun (expected_output : field, ()) => {
 			Pedersen.digest_bits(params, u);
   	} ,utxos
 	);
-  let left_hash : field = List.nth(utxo_hashes, 0i);
-	let right_hash : field = List.nth(utxo_hashes, 1i);
 
 	// Check that the set matches the known utxo set.
-  let root : field  = Pedersen.digest_bits(params,
-    Field.to_bits(left_hash) @ Field.to_bits(right_hash)
-  ); 
+  // Lazy hash accumulator instead of a Merkle tree...
+  // TODO: actual Merkle tree.
+  let root : field = List.fold_left( 
+    fun(acc, x) => { 
+      Pedersen.digest_bits(params,
+        Field.to_bits(acc) @ Field.to_bits(x)
+      ); 
+    },
+    0,
+    utxo_hashes
+  );
   Field.Assert.equal(expected_output, root);
 
 	// Check that the utxo we care about is in the set we just hashed.
